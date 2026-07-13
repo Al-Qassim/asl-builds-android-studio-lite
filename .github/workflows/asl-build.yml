@@ -1,0 +1,47 @@
+name: ASL Build
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Ephemeral release tag containing project.zip
+        required: true
+        type: string
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download project.zip from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "${{ inputs.release_tag }}" -p project.zip -R "${{ github.repository }}"
+          mkdir -p project
+          unzip -q project.zip -d project
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Assemble debug APK
+        working-directory: project
+        run: gradle assembleDebug --no-daemon
+      - name: Upload APK to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK=$(find project -path "*/build/outputs/apk/debug/*.apk" | head -n 1)
+          if [ -z "$APK" ]; then
+            echo "No debug APK found"
+            find project -name "*.apk" || true
+            exit 1
+          fi
+          cp "$APK" app-debug.apk
+          gh release upload "${{ inputs.release_tag }}" app-debug.apk -R "${{ github.repository }}" --clobber
